@@ -1,66 +1,45 @@
 import numpy as np
-import os
-from tensorflow.keras.models import Model, load_model
-from tensorflow.keras.layers import Input, LSTM, RepeatVector
-from data.preprocess import preprocess
+import pandas as pd
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import LSTM, Dense
 
+def run_lstm(uploaded_file):
 
-# Convert data into sequences
-def create_sequences(data, seq_length=20):  
-    sequences = []
-    for i in range(len(data) - seq_length):
-        sequences.append(data[i:i+seq_length])
-    return np.array(sequences)
+    # ---------------- LOAD DATA ----------------
+    df = pd.read_csv(uploaded_file)
 
+    # ---------------- SELECT NUMERIC ----------------
+    df_numeric = df.select_dtypes(include=[np.number])
 
-def run_lstm(file_path=None):
-    data, df = preprocess(file_path)
+    # ---------------- LIMIT DATA (rows) ----------------
+    df_numeric = df_numeric.head(9790)
 
-    # Create sequences
-    X = create_sequences(data)
+    # ---------------- NORMALIZATION ----------------
+    df_norm = (df_numeric - df_numeric.mean()) / (df_numeric.std() + 1e-8)
 
-    timesteps = X.shape[1]
-    features = X.shape[2]
+    # ---------------- RESHAPE ----------------
+    X = df_norm.values.reshape((df_norm.shape[0], 1, df_norm.shape[1]))
 
-    # Model architecture
-    inputs = Input(shape=(timesteps, features))
-    encoded = LSTM(64, activation='relu')(inputs)
-    decoded = RepeatVector(timesteps)(encoded)
-    decoded = LSTM(features, activation='relu', return_sequences=True)(decoded)
-
-    model = Model(inputs, decoded)
+    # ---------------- MODEL ----------------
+    model = Sequential()
+    model.add(LSTM(32, activation='relu', input_shape=(1, X.shape[2])))
+    model.add(Dense(X.shape[2]))
     model.compile(optimizer='adam', loss='mse')
 
-    # ---------------- SAVE / LOAD MODEL ----------------
-    model_path = "models/lstm_model.h5"
+    # ---------------- TRAIN ----------------
+    model.fit(X, X, epochs=3, batch_size=32, verbose=0)
 
-    if os.path.exists(model_path):
-        print("✅ Loading saved model...")
-        model = load_model(model_path, compile=False)
-        model.compile(optimizer='adam', loss='mse')
-    else:
-        print("🚀 Training new model...")
-        model.fit(X, X, epochs=2, batch_size=32, verbose=1)
-        model.save(model_path)
-        print("💾 Model saved!")
+    # ---------------- PREDICT (BATCHED) ----------------
+    preds = model.predict(X, batch_size=32, verbose=0)
 
-    # ---------------- PREDICTION ----------------
-    recon = model.predict(X)
+    # ---------------- ERROR CALCULATION ----------------
+    error = np.mean((X - preds) ** 2, axis=(1, 2))
 
-    # Error calculation
-    mse = np.mean(np.power(X - recon, 2), axis=(1, 2))
+    # ---------------- THRESHOLD ----------------
+    threshold = np.percentile(error, 95)
 
-    # Threshold
-    threshold = np.percentile(mse, 95)
-    anomalies = mse > threshold
+    # ---------------- OUTPUT ----------------
+    df_numeric["anomaly"] = (error > threshold).astype(int)
+    df_numeric["anomaly_score"] = error
 
-    # Align with dataframe
-    df = df.iloc[len(df) - len(anomalies):].copy()
-    df["anomaly"] = anomalies.astype(int)
-
-    return df
-
-
-if __name__ == "__main__":
-    df = run_lstm()
-    print(df.head())
+    return df_numeric

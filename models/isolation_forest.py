@@ -1,22 +1,25 @@
 from sklearn.ensemble import IsolationForest
-from data.preprocess import preprocess
+import numpy as np
 
-def run_model():
-    # Load processed data
-    data, df = preprocess()
+# Train model (dummy or real data)
+model = IsolationForest(
+    n_estimators=100,
+    contamination=0.05,
+    random_state=42
+)
 
-    # Create model
-    model = IsolationForest(contamination=0.03, random_state=42)
+# Dummy training (must match feature size = 3)
+X_dummy = np.random.rand(200, 3)
+model.fit(X_dummy)
 
-    # Train + predict
-    preds = model.fit_predict(data)
+def run_model(input_data):
+    """
+    input_data: list or array of 3 sensor values
+    """
+    x = np.array(input_data).reshape(1, -1)
+    pred = model.predict(x)[0]
 
-    # Convert predictions
-    df["anomaly"] = [1 if p == -1 else 0 for p in preds]
-
-    return df
-
-
-if __name__ == "__main__":
-    df = run_model()
-    print(df.head())
+    if pred == -1:
+        return "⚠️ Anomaly Detected"
+    else:
+        return "✅ Normal"

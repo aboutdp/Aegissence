@@ -62,16 +62,35 @@ if run_button:
 
     with st.spinner("⏳ Running Model... Please wait"):
 
+        if uploaded_file is None:
+            st.error("❌ Please upload dataset")
+            st.stop()
+
+        uploaded_file.seek(0)
+        df_input = pd.read_csv(uploaded_file)
+
         if model_choice == "Isolation Forest":
-            from models.isolation_forest import run_model
-            st.session_state.df = run_model()
+            from sklearn.ensemble import IsolationForest
+
+            df_numeric = df_input.select_dtypes(include=["number"])
+
+            model = IsolationForest(
+                n_estimators=100,
+                contamination=0.05,
+                random_state=42
+            )
+
+            model.fit(df_numeric)
+            preds = model.predict(df_numeric)
+
+            df_input["anomaly"] = (preds == -1).astype(int)
+
+            st.session_state.df = df_input
 
         else:
+            uploaded_file.seek(0)
             from models.lstm_autoencoder import run_lstm
-            if uploaded_file is not None:
-                st.session_state.df = run_lstm(uploaded_file)
-            else:
-                st.session_state.df = run_lstm()
+            st.session_state.df = run_lstm(uploaded_file)
 
     end_time = time.time()
     st.success("✅ Model Run Completed!")
@@ -82,17 +101,26 @@ df = st.session_state.df
 
 # ---------------- WAIT MESSAGE ----------------
 if df is None:
-    st.warning("⚠️ Please click '🚀 Run Model' to start analysis")
+    st.warning("Please click '🚀 Run Model' to start analysis")
+
+# ---------------- HELPER ----------------
+def classify_severity(score):
+    if score > 0.5:
+        return "High"
+    elif score > 0.2:
+        return "Medium"
+    else:
+        return "Low"
 
 # ---------------- MAIN OUTPUT ----------------
 if df is not None:
 
-    # Dataset indicator
-    if uploaded_file is not None:
-        dataset_name = uploaded_file.name
-    else:
-        dataset_name = "CMAPSS (Default)"
+    # Add severity safely
+    if "anomaly_score" in df.columns:
+        df["severity"] = df["anomaly_score"].apply(classify_severity)
 
+    # Dataset indicator
+    dataset_name = uploaded_file.name if uploaded_file else "Default"
     st.info(f"📂 Dataset: {dataset_name}")
 
     # -------- SENSOR DETECTION --------
@@ -101,33 +129,28 @@ if df is not None:
     if len(sensor_columns) == 0:
         sensor_columns = df.select_dtypes(include=["number"]).columns.tolist()
 
-    if "anomaly" in sensor_columns:
-        sensor_columns.remove("anomaly")
-    if "anomaly_score" in sensor_columns:
-        sensor_columns.remove("anomaly_score")
+    for col in ["anomaly", "anomaly_score"]:
+        if col in sensor_columns:
+            sensor_columns.remove(col)
 
     # ---------------- KPI ----------------
-    total_anomalies = df["anomaly"].sum()
+    total_anomalies = int(df["anomaly"].sum())
     total_points = len(df)
 
     col1, col2, col3 = st.columns(3)
     col1.metric("📊 Total Data Points", total_points)
     col2.metric("⚠️ Anomalies", total_anomalies)
-    col3.metric("✅ Health", "Good" if total_anomalies < 1000 else "Warning")
+    col3.metric("📉 Rate", f"{round(df['anomaly'].mean()*100,2)}%")
 
-    # ---------------- ALERT ----------------
-    if total_anomalies > 1000:
-        st.error("🚨 High Risk Detected")
+    # ---------------- SYSTEM RISK ----------------
+    anomaly_rate = df["anomaly"].mean()
+
+    if anomaly_rate > 0.1:
+        st.error("🚨 System Risk: HIGH")
+    elif anomaly_rate > 0.05:
+        st.warning("⚠️ System Risk: MEDIUM")
     else:
         st.success("✅ System Stable")
-
-    # ---------------- SYSTEM INSIGHT ----------------
-    st.subheader("📌 System Insight")
-
-    if total_anomalies > 1000:
-        st.write("⚠️ High anomaly rate detected. Possible system instability.")
-    else:
-        st.write("✅ System operating within normal conditions.")
 
     # ---------------- CONTROLS ----------------
     st.sidebar.header("⚙️ Controls")
@@ -168,8 +191,9 @@ if df is not None:
         anomalies.index,
         anomalies[focus_sensor],
         color='red',
-        label="Anomaly",
-        s=20
+        s=40,
+        alpha=0.7,
+        label="Anomaly"
     )
 
     ax.legend()
@@ -216,16 +240,17 @@ if df is not None:
 
 # ---------------- FOOTER ----------------
 st.markdown("---")
-st.subheader("About AegisSense")
-
-st.write("""
-AegisSense is an AI-based industrial monitoring system designed to detect anomalies 
-in multi-sensor time-series data using Machine Learning and Deep Learning models.
-""")
+st.markdown(
+    "<h3 style='text-align: center; font-weight: 800;'>AegisSense | Predictive Maintenance System</h3>",
+    unsafe_allow_html=True
+)
+st.markdown(
+    "<p style='text-align: center; font-size: 16px;'>Henal | Daksh | Ravi | Hetv | Paxaal</p>",
+    unsafe_allow_html=True
+)
 
 # ---------------- AUTO REFRESH ----------------
 st.sidebar.subheader("🔄 Live Mode")
-
 refresh = st.sidebar.checkbox("Enable Auto Refresh")
 
 if refresh:
